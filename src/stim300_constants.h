@@ -1,11 +1,15 @@
-#ifndef DRIVER_STIM300_STIM300_CONSTANTS_H
-#define DRIVER_STIM300_STIM300_CONSTANTS_H
+// This file is from a stim300 driver package available under MIT license
+// File comes from https://github.com/vortexntnu/stim300-driver
+// Copyright (c) 2019 Vortex NTNU  MIT License
+
+#pragma once
+
+#include <math.h>
 
 #include <array>
 #include <cstdint>
-#include <math.h>
 
-namespace stim_const {
+namespace stim_300 {
 static constexpr uint8_t N_BYTES_DATAGRAM_ID = 1;
 static constexpr uint8_t N_BYTES_INERTIAL_SENSOR = 3;
 static constexpr uint8_t N_BYTES_TEMP_SENSOR = 2;
@@ -16,6 +20,7 @@ static constexpr uint8_t N_BYTES_CRC = 4;
 static constexpr uint8_t N_BYTES_STATUS = 1;
 static constexpr uint8_t N_BYTES_TERMINATION = 2;
 static constexpr uint8_t MAX_DATAGRAM_SIZE = 65;
+static constexpr uint16_t MAX_SERVICEMODE_REPLY_SIZE = 2000;
 
 enum class DatagramIdentifier {
   RATE,
@@ -40,13 +45,6 @@ enum class DatagramIdentifier {
 
 enum class AccRange { G2, G5, G10, G30, G80 };
 
-enum class BaudRate { // defined as bit-rate in datasheet
-  BAUD_377400,
-  BAUD_460800,
-  BAUD_921600,
-  BAUD_1843200,
-};
-
 enum class GyroOutputUnit {
   ANGULAR_RATE,
   AVERAGE_ANGULAR_RATE,
@@ -70,19 +68,20 @@ enum class SampleFreq { S125, S250, S500, S1000, S2000, TRG };
 
 static constexpr uint16_t sampleFreq2int(const SampleFreq &sample_freq) {
   switch (sample_freq) {
-  case SampleFreq::S125:
-    return 125;
-  case SampleFreq::S250:
-    return 250;
-  case SampleFreq::S500:
-    return 500;
-  case SampleFreq::S1000:
-    return 1000;
-  case SampleFreq::S2000:
-    return 2000;
-  case SampleFreq::TRG:
-    return 0;
+    case SampleFreq::S125:
+      return 125;
+    case SampleFreq::S250:
+      return 250;
+    case SampleFreq::S500:
+      return 500;
+    case SampleFreq::S1000:
+      return 1000;
+    case SampleFreq::S2000:
+      return 2000;
+    case SampleFreq::TRG:
+      return 0;
   }
+  return 0;
 }
 
 enum SensorIndx { GYRO = 0, ACC, INCL, TEMP, AUX };
@@ -94,128 +93,78 @@ struct DatagramInfo {
   uint8_t number_of_padding_bytes;
 };
 
-static constexpr std::array<DatagramInfo, 18>
-    datagram_info_map // rate,  acc, incl, temp,  aux
+static constexpr std::array<DatagramInfo, 18> datagram_info_map  // rate,  acc, incl, temp,  aux
     {{
         {DatagramIdentifier::RATE, 0x90, {true, false, false, false, false}, 2},
-        {DatagramIdentifier::RATE_ACC,
-         0x91,
-         {true, true, false, false, false},
-         0},
-        {DatagramIdentifier::RATE_INCL,
-         0x92,
-         {true, false, true, false, false},
-         0},
-        {DatagramIdentifier::RATE_ACC_INCL,
-         0x93,
-         {true, true, true, false, false},
-         2},
-        {DatagramIdentifier::RATE_TEMP,
-         0x94,
-         {true, false, false, true, false},
-         3},
-        {DatagramIdentifier::RATE_ACC_TEMP,
-         0xA5,
-         {true, true, false, true, false},
-         2},
-        {DatagramIdentifier::RATE_INCL_TEMP,
-         0xA6,
-         {true, false, true, true, false},
-         2},
-        {DatagramIdentifier::RATE_ACC_INCL_TEMP,
-         0xA7,
-         {true, true, true, true, false},
-         1},
-        {DatagramIdentifier::RATE_AUX,
-         0x98,
-         {true, false, false, false, true},
-         2},
-        {DatagramIdentifier::RATE_ACC_AUX,
-         0x99,
-         {true, true, false, false, true},
-         0},
-        {DatagramIdentifier::RATE_INCL_AUX,
-         0x9A,
-         {true, false, true, false, true},
-         0},
-        {DatagramIdentifier::RATE_ACC_INCL_AUX,
-         0x9B,
-         {true, true, true, false, true},
-         2},
-        {DatagramIdentifier::RATE_TEMP_AUX,
-         0x9C,
-         {true, false, false, true, true},
-         3},
-        {DatagramIdentifier::RATE_ACC_TEMP_AUX,
-         0xAD,
-         {true, true, false, true, true},
-         2},
-        {DatagramIdentifier::RATE_INCL_TEMP_AUX,
-         0xAE,
-         {true, false, true, true, true},
-         2},
-        {DatagramIdentifier::RATE_ACC_INCL_TEMP_AUX,
-         0xAF,
-         {true, true, true, true, true},
-         1},
-        {DatagramIdentifier::CONFIGURATION,
-         0xBC,
-         {false, false, false, false, false},
-         2},
-        {DatagramIdentifier::CONFIGURATION_CRLF,
-         0xBD,
-         {false, false, false, false, false},
-         2},
+        {DatagramIdentifier::RATE_ACC, 0x91, {true, true, false, false, false}, 0},
+        {DatagramIdentifier::RATE_INCL, 0x92, {true, false, true, false, false}, 0},
+        {DatagramIdentifier::RATE_ACC_INCL, 0x93, {true, true, true, false, false}, 2},
+        {DatagramIdentifier::RATE_TEMP, 0x94, {true, false, false, true, false}, 3},
+        {DatagramIdentifier::RATE_ACC_TEMP, 0xA5, {true, true, false, true, false}, 2},
+        {DatagramIdentifier::RATE_INCL_TEMP, 0xA6, {true, false, true, true, false}, 2},
+        {DatagramIdentifier::RATE_ACC_INCL_TEMP, 0xA7, {true, true, true, true, false}, 1},
+        {DatagramIdentifier::RATE_AUX, 0x98, {true, false, false, false, true}, 2},
+        {DatagramIdentifier::RATE_ACC_AUX, 0x99, {true, true, false, false, true}, 0},
+        {DatagramIdentifier::RATE_INCL_AUX, 0x9A, {true, false, true, false, true}, 0},
+        {DatagramIdentifier::RATE_ACC_INCL_AUX, 0x9B, {true, true, true, false, true}, 2},
+        {DatagramIdentifier::RATE_TEMP_AUX, 0x9C, {true, false, false, true, true}, 3},
+        {DatagramIdentifier::RATE_ACC_TEMP_AUX, 0xAD, {true, true, false, true, true}, 2},
+        {DatagramIdentifier::RATE_INCL_TEMP_AUX, 0xAE, {true, false, true, true, true}, 2},
+        {DatagramIdentifier::RATE_ACC_INCL_TEMP_AUX, 0xAF, {true, true, true, true, true}, 1},
+        {DatagramIdentifier::CONFIGURATION, 0xBC, {false, false, false, false, false}, 2},
+        {DatagramIdentifier::CONFIGURATION_CRLF, 0xBD, {false, false, false, false, false}, 2},
     }};
 
 constexpr uint8_t datagramIdentifierToRaw(DatagramIdentifier d_id) {
-  for (int i = 0; i < datagram_info_map.size(); ++i) {
+  for (size_t i = 0; i < datagram_info_map.size(); ++i) {
     if (datagram_info_map[i].id == d_id) {
       return datagram_info_map[i].raw_id;
     }
   }
+  return 0;
 }
 
 constexpr DatagramIdentifier rawToDatagramIdentifier(uint8_t datagram_id) {
-  for (int i = 0; i < datagram_info_map.size(); ++i) {
+  for (size_t i = 0; i < datagram_info_map.size(); ++i) {
     if (datagram_info_map[i].raw_id == datagram_id) {
       return datagram_info_map[i].id;
     }
   }
-  return DatagramIdentifier::CONFIGURATION_CRLF; // Todo: implement error
-                                                 // handeling
-};
+  return DatagramIdentifier::CONFIGURATION_CRLF;  // Todo: implement error
+                                                  // handeling
+}
 
 constexpr uint8_t numberOfPaddingBytes(DatagramIdentifier datagram_identifier) {
-  for (int i = 0; i < datagram_info_map.size(); ++i) {
+  for (size_t i = 0; i < datagram_info_map.size(); ++i) {
     if (datagram_info_map[i].id == datagram_identifier) {
       return datagram_info_map[i].number_of_padding_bytes;
     }
   }
+  return 0;
 }
 
-constexpr std::array<bool, 5>
-isIncluded(DatagramIdentifier datagram_identifier) {
-  for (int i = 0; i < datagram_info_map.size(); ++i) {
+constexpr std::array<bool, 5> isIncluded(DatagramIdentifier datagram_identifier) {
+  for (size_t i = 0; i < datagram_info_map.size(); ++i) {
     if (datagram_info_map[i].id == datagram_identifier) {
       return datagram_info_map[i].included_sensors;
     }
   }
+  return {true, false, false, false, false};  // Should never get here so return RATE settings
 }
 
-static DatagramIdentifier toDatagramID(std::array<bool, 5> isIncluded) {
-  for (int i = 0; i < datagram_info_map.size(); ++i) {
+static inline DatagramIdentifier toDatagramID(std::array<bool, 5> isIncluded) {
+  for (size_t i = 0; i < datagram_info_map.size(); ++i) {
     if (datagram_info_map[i].included_sensors == isIncluded) {
       return datagram_info_map[i].id;
     }
   }
+  return DatagramIdentifier::RATE_AUX;  // This is to suppress a warning as we never hit here anyway
 }
 
-static const uint8_t
-calculateDatagramSize(DatagramIdentifier datagram_identifier) {
-  if (datagram_identifier == DatagramIdentifier::CONFIGURATION or
+static inline uint8_t calculateDatagramSize(DatagramIdentifier datagram_identifier) {
+  if (datagram_identifier == DatagramIdentifier::CONFIGURATION ||
       datagram_identifier == DatagramIdentifier::CONFIGURATION_CRLF) {
-    return 26; // CR LF ending not included in datagram.
+    return 26;  // CR LF ending not included in datagram.
   }
 
   std::array<bool, 5> is_included = isIncluded(datagram_identifier);
@@ -229,8 +178,7 @@ calculateDatagramSize(DatagramIdentifier datagram_identifier) {
   size += is_included[SensorIndx::TEMP]
               ? n_inertial_sensors * (3 * N_BYTES_TEMP_SENSOR + N_BYTES_STATUS)
               : 0;
-  size +=
-      is_included[SensorIndx::AUX] ? N_BYTES_AUX_SENSOR + N_BYTES_STATUS : 0;
+  size += is_included[SensorIndx::AUX] ? N_BYTES_AUX_SENSOR + N_BYTES_STATUS : 0;
   size += N_BYTES_COUNTER;
   size += N_BYTES_LATENCY;
   size += N_BYTES_CRC;
@@ -242,42 +190,41 @@ constexpr uint32_t powerOf2(uint8_t power) { return 1 << power; }
 
 static constexpr double accScale(AccRange acc_range) {
   switch (acc_range) {
-  case AccRange::G2:
-    return 1.0 / powerOf2(21);
-  case AccRange::G5:
-    return 1.0 / powerOf2(20);
-  case AccRange::G10:
-    return 1.0 / powerOf2(19);
-  case AccRange::G30:
-    return 1.0 / powerOf2(18);
-  case AccRange::G80:
-    return 1.0 / powerOf2(16);
+    case AccRange::G2:
+      return 1.0 / powerOf2(21);
+    case AccRange::G5:
+      return 1.0 / powerOf2(20);
+    case AccRange::G10:
+      return 1.0 / powerOf2(19);
+    case AccRange::G30:
+      return 1.0 / powerOf2(18);
+    case AccRange::G80:
+      return 1.0 / powerOf2(16);
   }
+  return 0.0;
 }
 
 static constexpr double accIncrScale(AccRange acc_range) {
   switch (acc_range) {
-  case AccRange::G2:
-    return 1.0 / powerOf2(24);
-  case AccRange::G5:
-    return 1.0 / powerOf2(23);
-  case AccRange::G10:
-    return 1.0 / powerOf2(22);
-  case AccRange::G30:
-    return 1.0 / powerOf2(21);
-  case AccRange::G80:
-    return 1.0 / powerOf2(19);
+    case AccRange::G2:
+      return 1.0 / powerOf2(24);
+    case AccRange::G5:
+      return 1.0 / powerOf2(23);
+    case AccRange::G10:
+      return 1.0 / powerOf2(22);
+    case AccRange::G30:
+      return 1.0 / powerOf2(21);
+    case AccRange::G80:
+      return 1.0 / powerOf2(19);
   }
+  return 0.0;
 }
 
-static constexpr double gyroIncrScale() {
-  return (M_PI / 180.00) / powerOf2(21);
-}
+static constexpr double gyroIncrScale() { return (M_PI / 180.00) / powerOf2(21); }
 static constexpr double gyroScale() { return (M_PI / 180.00) / powerOf2(14); }
 static constexpr double inclScale() { return 1.0 / powerOf2(22); }
 static constexpr double inclIncrScale() { return 1.0 / powerOf2(25); }
 static constexpr double tempScale() { return 1.0 / powerOf2(8); }
 static constexpr double auxScale() { return 5.0 / powerOf2(24); }
 
-} // namespace stim_const
-#endif // DRIVER_STIM300_STIM300_CONSTANTS_H
+}  // namespace stim_300
