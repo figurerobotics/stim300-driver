@@ -1,22 +1,31 @@
-#ifndef DRIVER_STIM300_SERIAL_UBUNTU_H
-#define DRIVER_STIM300_SERIAL_UBUNTU_H
+// This file is from a stim300 driver package available under MIT license
+// File comes from https://github.com/vortexntnu/stim300-driver
+// Copyright (c) 2019 Vortex NTNU  MIT License
 
-#include "serial_driver.h"
+#pragma once
+
 #include <fcntl.h>
-#include <string>
+#include <stdint.h>
 #include <termios.h>
 #include <unistd.h>
 
-#include "stim300_constants.h"
 #include <cstring>
 #include <stdexcept>
-#include <stdint.h>
+#include <string>
+
+#include "apps/imu_app/serial_driver.h"
+
+enum class BaudRate {  // defined as bit-rate in datasheet
+  BAUD_377400,
+  BAUD_460800,
+  BAUD_921600,
+  BAUD_1843200,
+};
 
 class SerialUnix : public SerialDriver {
-public:
-  SerialUnix(const std::string &serial_port_name,
-             stim_const::BaudRate baudrate);
-  ~SerialUnix() final;
+ public:
+  SerialUnix(const std::string &serial_port_name, BaudRate baudrate);
+  ~SerialUnix();
   // The class is Non-Copyable
   SerialUnix(const SerialUnix &a) = delete;
   SerialUnix &operator=(const SerialUnix &a) = delete;
@@ -26,14 +35,13 @@ public:
 
   bool writeByte(uint8_t byte) final;
   bool readByte(uint8_t &byte) final;
+  int readBytes(uint8_t *bytes, int numBytes) final;
   bool flush() final;
 
-private:
-  void open(const std::string &serial_port_name, stim_const::BaudRate baudrate);
+ private:
+  void open(const std::string &serial_port_name, BaudRate baudrate);
   void close();
 
   int file_handle_;
   struct termios config_;
 };
-
-#endif // DRIVER_STIM300_SERIAL_UBUNTU_H

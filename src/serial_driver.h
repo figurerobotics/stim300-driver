@@ -1,15 +1,16 @@
+// This file is from a stim300 driver package available under MIT license
+// File comes from https://github.com/vortexntnu/stim300-driver
+// Copyright (c) 2019 Vortex NTNU  MIT License
 
-#ifndef DRIVER_STIM300_SERIAL_DRIVER_H
-#define DRIVER_STIM300_SERIAL_DRIVER_H
+#pragma once
 
 #include <stdint.h>
 
 class SerialDriver {
-public:
+ public:
   virtual ~SerialDriver() = default;
   virtual bool readByte(uint8_t &byte) = 0;
+  virtual int readBytes(uint8_t *bytes, int numBytes) = 0;
   virtual bool writeByte(uint8_t byte) = 0;
   virtual bool flush() = 0;
 };
-
-#endif // DRIVER_STIM300_SERIAL_DRIVER_H
