@@ -99,6 +99,8 @@ class DriverStim300 {
   int32_t enterServiceMode();
   void exitServiceMode();
   int32_t setSampleRate(uint16_t samplesPerSec);
+  std::string readReplyUntilChar(char c, int32_t maxCharToWait);
+  std::string getInformation(char info_type, int32_t max_reply_length);
   int32_t setDatagramFormat(uint16_t mode);
   int32_t setAccelerometerFilter(uint16_t frequency);
   int32_t setGyroscopeFilter(uint16_t frequency);
@@ -139,6 +141,7 @@ class DriverStim300 {
                              const std::vector<uint8_t>::const_iterator &end,
                              const uint8_t &crc_dummy_bytes);
 
+  void sendString(std::string data);
   void sendStringWithCR(std::string data);
   int32_t readUntilChar(char c, int32_t maxCharToWait);
   void askForConfigDatagram();

@@ -296,30 +296,55 @@ void DriverStim300::askForConfigDatagram() {
   serial_driver_.writeByte('\r');
 }
 
-void DriverStim300::sendStringWithCR(std::string data) {
+// Send a string without any added termination
+void DriverStim300::sendString(std::string data) {
   for (std::string::size_type i = 0; i < data.size(); ++i) {
     serial_driver_.writeByte(data[i]);
   }
+}
+
+// Send a string followed by a Carrage return
+void DriverStim300::sendStringWithCR(std::string data) {
+  sendString(data);
   serial_driver_.writeByte('\r');
 }
 
 // { ----------------------- Routines for SERVICEMODE -------------------------------
 
-// readUntilChar:  Simple read until special character comes in
+// @brief read until special character comes in
+//
+// @return number of chars read till we got the desired char
 //
 // This would be better if we had a way to timeout
 // besides a max char count to wait
-// Returns number of chars read till we got the desired char
 int32_t DriverStim300::readUntilChar(char c, int32_t maxCharToWait) {
   uint8_t byte;
   int32_t charsRead = 0;
-  while (serial_driver_.readByte(byte) && (charsRead >= maxCharToWait)) {
+  while (serial_driver_.readByte(byte) && (charsRead < maxCharToWait)) {
     charsRead++;
     if (byte == c) {
       break;
     }
   }
   return charsRead;
+}
+
+// @brief read string until a special character comes in
+//
+// @return string that was read in full
+//
+std::string DriverStim300::readReplyUntilChar(char c, int32_t maxCharToWait) {
+  uint8_t byte;
+  std::string reply = "";
+  int32_t charsRead = 0;
+  while (serial_driver_.readByte(byte) && (charsRead < maxCharToWait)) {
+    charsRead++;
+    if (byte == c) {
+      break;
+    }
+    reply.push_back(byte);
+  }
+  return reply;
 }
 
 // enterServiceMode:  Enters SERVICEMODE
@@ -331,22 +356,28 @@ int32_t DriverStim300::readUntilChar(char c, int32_t maxCharToWait) {
 // Returns 0 if no error and we are in service mode
 //
 int32_t DriverStim300::enterServiceMode() {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
 
   spdlog::debug("Stim300: Enter SERVICE Mode");
   sendStringWithCR("SERVICEMODE");
 
-  // A large report comes back so we wait for final   '>' prompt
-  returnedChars = readUntilChar('>', MAX_SERVICEMODE_REPLY_SIZE);  // text per datasheet
-  spdlog::debug("Stim300: enterServiceMode reply was {} chars", returnedChars);
-  if ((returnedChars < 60) || (returnedChars >= MAX_SERVICEMODE_REPLY_SIZE)) {
-    spdlog::error("Stim300: SERVICE Mode NOT entered properly!");
-    errorCode = -1;
-  } else {
+  // After sending  SERVICEMODE<CR> output stops after next datagram
+  // wait for any in-progress datagram then flush serial input
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  serial_driver_.flush();
+
+  // Ask for product name to test we are properly connected
+  std::string reply = getInformation('n', 50);
+  std::size_t found = reply.find("PRODUCT");
+  if (found != std::string::npos) {
+    spdlog::debug("Stim300: enterServiceMode IMU name {} chars", reply);
     spdlog::debug("Stim300: SERVICE Mode entered.");
+  } else {
+    spdlog::error("Stim300: SERVICE Mode NOT entered properly!");
+    ret_code = -1;
   }
-  return errorCode;
+
+  return ret_code;
 }
 
 // exitServiceMode:  Exits SERVICEMODE
@@ -363,16 +394,16 @@ void DriverStim300::exitServiceMode() {
 // WARNING! Must not power off the IMU till the save is done
 //
 int32_t DriverStim300::saveConfigData() {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   spdlog::debug("Stim300: Save configuration to flash memory");
   // Exits to normal mode right away, no confirm
   sendStringWithCR("s");
 
   // We sadly must wait and enter 'Y' to proceed as this is human interface
-  returnedChars = readUntilChar(':', 100);  // text per datasheet
-  if ((returnedChars < 30) || (returnedChars >= 100)) {
+  returned_chars = readUntilChar(':', 100);  // text per datasheet
+  if ((returned_chars < 30) || (returned_chars >= 100)) {
     spdlog::error("Stim300: saveConfigData invalid wait for confirm query!");
     return -2;
   }
@@ -381,24 +412,48 @@ int32_t DriverStim300::saveConfigData() {
   // This may take many milliseconds to write to flash
   // There is a chance it failed and we are not detecting failures robustly
   // We look for a reply length that is longer then the fault return lengths
-  returnedChars = readUntilChar('>', 200);  // text per datasheet
-  if ((returnedChars < 60) || (returnedChars >= 120)) {
+  returned_chars = readUntilChar('>', 200);  // text per datasheet
+  if ((returned_chars < 60) || (returned_chars >= 120)) {
     spdlog::error("Stim300: saveConfigData invalid reply for successful save!");
     return -3;
   }
   spdlog::debug("Stim300: Configuration saved to flash memory");
 
-  return errorCode;
+  return ret_code;
+}
+
+// Gets a reply string to an information query
+//
+// The single char input parameter matches Stim318 table 9.4 for type of data
+//
+// Sensor must be in SERVICEMODE prior to this call
+//
+std::string DriverStim300::getInformation(char info_type, int32_t max_reply_length) {
+  std::string reply = "";
+
+  serial_driver_.flush();
+
+  // Ask for datagram format as a test we are properly connected
+  // The sensor expects  "i T<CR>"  where T is the type
+  sendString("i ");
+  serial_driver_.writeByte(info_type);
+  serial_driver_.writeByte('\r');
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  reply = readReplyUntilChar('>', max_reply_length);
+
+  return reply;
 }
 
 // setDatagramFormat:  Set datagram format to included selected data values
 //
 // Returns 0 if no error, non-zero for some type of error
 int32_t DriverStim300::setDatagramFormat(uint16_t datagramFormat) {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   spdlog::debug("Stim300: setDatagramFormat setting format {}", datagramFormat);
+  serial_driver_.flush();
   if (datagramFormat > 7) {
     spdlog::error("Stim300: setDatagramFormat parameter error!");
     return -1;
@@ -415,26 +470,27 @@ int32_t DriverStim300::setDatagramFormat(uint16_t datagramFormat) {
   serial_driver_.writeByte('\r');
 
   // text per datasheet
-  returnedChars = readUntilChar('>', 100);
-  spdlog::debug("Stim300: Set datagram format reply was {} chars", returnedChars);
-  if ((returnedChars < 15) || (returnedChars >= 100)) {
+  returned_chars = readUntilChar('>', 100);
+  spdlog::debug("Stim300: Set datagram format reply was {} chars", returned_chars);
+  if ((returned_chars < 15) || (returned_chars >= 100)) {
     spdlog::error("Stim300: setDatagramFormat unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
-  return errorCode;
+  return ret_code;
 }
 
 // setSampleRate: Sets sample rate to next lowest rate but minimum is 125
 //
 int32_t DriverStim300::setSampleRate(uint16_t samplesPerSec) {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   spdlog::debug("Stim300: Set samples per sec to {}", samplesPerSec);
   if (samplesPerSec > 1000) {
     spdlog::error("Stim300: setSampleRate out of range sample rate {}!", samplesPerSec);
     return -1;
   }
+  serial_driver_.flush();
 
   // Excuse the turse format as it is most effective for this sort of code
   char sampleRateSelect = '0';
@@ -449,18 +505,18 @@ int32_t DriverStim300::setSampleRate(uint16_t samplesPerSec) {
   serial_driver_.writeByte(sampleRateSelect);
   serial_driver_.writeByte('\r');
 
-  returnedChars = readUntilChar('>', 30);  // text per datasheet
-  if ((returnedChars < 15) || (returnedChars >= 30)) {
+  returned_chars = readUntilChar('>', 30);  // text per datasheet
+  if ((returned_chars < 15) || (returned_chars >= 30)) {
     spdlog::error("Stim300: setDatagramFormat unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
-  return errorCode;
+  return ret_code;
 }
 
 // Sets accelerometer sample rate with minimum of 16hz
 int32_t DriverStim300::setAccelerometerFilter(uint16_t frequency) {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   spdlog::debug("Stim300: Set accelerometer filter to {} hz", frequency);
   // Excuse the turse format as it is most effective for this sort of code
@@ -471,29 +527,30 @@ int32_t DriverStim300::setAccelerometerFilter(uint16_t frequency) {
   if (frequency >= 33) filterRateSelect = '1';
   if (frequency <= 16) filterRateSelect = '0';
 
+  serial_driver_.flush();
   serial_driver_.writeByte('f');
   serial_driver_.writeByte(' ');
   serial_driver_.writeByte(filterRateSelect);
   serial_driver_.writeByte('\r');
 
-  returnedChars = readUntilChar('>', 100);  // text per datasheet
-  if ((returnedChars < 20) || (returnedChars >= 100)) {
+  returned_chars = readUntilChar('>', 100);  // text per datasheet
+  if ((returned_chars < 20) || (returned_chars >= 100)) {
     spdlog::error("Stim300: setDatagramFormat unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
 
-  returnedChars = readUntilChar('>', 50);  // text per datasheet
-  if ((returnedChars < 15) || (returnedChars >= 50)) {
+  returned_chars = readUntilChar('>', 50);  // text per datasheet
+  if ((returned_chars < 15) || (returned_chars >= 50)) {
     spdlog::error("Stim300: setAccelerometerFilter unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
-  return errorCode;
+  return ret_code;
 }
 
 // Sets gyroscope sample rate with minimum of 16hz
 int32_t DriverStim300::setGyroscopeFilter(uint16_t frequency) {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   spdlog::debug("Stim300: Set gyroscope filter to {} hz", frequency);
   if (frequency > 1000) {
@@ -514,33 +571,33 @@ int32_t DriverStim300::setGyroscopeFilter(uint16_t frequency) {
   serial_driver_.writeByte(filterRateSelect);
   serial_driver_.writeByte('\r');
 
-  returnedChars = readUntilChar('>', 50);  // text per datasheet
-  if ((returnedChars < 15) || (returnedChars >= 50)) {
+  returned_chars = readUntilChar('>', 50);  // text per datasheet
+  if ((returned_chars < 15) || (returned_chars >= 50)) {
     spdlog::error("Stim300: setGyroscopeFilter unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
-  return errorCode;
+  return ret_code;
 }
 
 // Sets RS-422 line termination
 int32_t DriverStim300::setLineTermination(uint16_t mode) {
-  int32_t errorCode = 0;
-  int32_t returnedChars = 0;
+  int32_t ret_code = 0;
+  int32_t returned_chars = 0;
 
   if (mode == 0) {
     spdlog::debug("Stim300: Disable RS422 line termination");
     sendStringWithCR("r 0");
-    returnedChars = readUntilChar('>', 50);  // text per datasheet
+    returned_chars = readUntilChar('>', 50);  // text per datasheet
   } else {
     spdlog::debug("Stim300: Enable RS422 line termination");
     sendStringWithCR("r 1");
-    returnedChars = readUntilChar('>', 50);  // text per datasheet
+    returned_chars = readUntilChar('>', 50);  // text per datasheet
   }
-  if ((returnedChars < 10) || (returnedChars >= 50)) {
+  if ((returned_chars < 10) || (returned_chars >= 50)) {
     spdlog::error("Stim300: setLineTermination unexpected reply error!");
-    errorCode = -2;
+    ret_code = -2;
   }
-  return errorCode;
+  return ret_code;
 }
 
 // } -------------------- End  Routines for SERVICEMODE ----------------------
